@@ -11,7 +11,6 @@
 class BMP
 {
 public:
-
 	class RGB
 	{
 	public:
@@ -82,9 +81,8 @@ bool collectAllColors()
 		fread(&image_info, sizeof(image_info), 1, bmpFile);
 
 		h_all_colors.resize(image_info.biHeight * image_info.biWidth);
-		// size_t padding = ((image_info.biWidth * (image_info.biBitCount / 8)) % 4) & 3;// align to 4 bytes
-		const int padding = ((4 - (image_info.biWidth * 3) % 4) % 4);
-		for (int i = 0; i < image_info.biHeight; ++i)
+		const int padding = ((4 - (image_info.biWidth * 3) % 4) % 4);//calculate padding for align to 4 bytes
+		for (int i = 0; i < image_info.biHeight; ++i)//read colors 
 		{
 			for (int j = 0; j < image_info.biWidth; ++j)
 			{
@@ -92,12 +90,11 @@ bool collectAllColors()
 				fread(&h_all_colors[i * image_info.biWidth + j].green, sizeof(h_all_colors[i * image_info.biWidth + j].green), 1, bmpFile);
 				fread(&h_all_colors[i * image_info.biWidth + j].red, sizeof(h_all_colors[i * image_info.biWidth + j].red), 1, bmpFile);
 			}
-			fseek(bmpFile, padding, SEEK_CUR);
+			fseek(bmpFile, padding, SEEK_CUR);//padding
 		}
 		fclose(bmpFile);
 		return true;
 	}
-	std::cout << "\nfile not exist\n";
 	return false;
 }
 void returnColors(std::vector<RGB> &result)
@@ -112,7 +109,6 @@ void returnColors(std::vector<RGB> &result)
 }
 void h_createColorPallete()
 {
-	//std::sort(h_all_colors.begin(), h_all_colors.end());
 	size_t index = 0;
 	auto begin = std::chrono::steady_clock::now();
 	for (auto v : h_all_colors)
@@ -150,60 +146,55 @@ void h_applyPalette()
 	}
 	auto end = std::chrono::steady_clock::now();
 	elapsed_applying = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
-	
-
 }
+void writeHTML()
+{
+	char h = '"';
+	std::ofstream to;
+	to.open("000.html", std::ios_base::out);
+	to << u8"<html><head><meta charset='utf-8'></head><body>";
+	int i = 0;
+	for (auto v : h_all_colors)
+	{
+		to << u8"<a style=" << h << "background-color:" << "rgb(" << (int)v.red << "," << (int)v.green << "," << (int)v.blue << ");" << h << ">" << "a" << u8"</a>";
+		i++;
+		if (i % image_info.biWidth == 0)
+			to << "<br>";
+	}
+	to<< u8"</body></html>";
+	to.close();
+}
+void printAllColors()
+{
+	for (auto v : h_all_colors)
+		std::cout << (int)v.red << " " << (int)v.green << " " << (int)v.blue << "\n";
+}
+void printAllColorsResize()
+{
+	for (auto v : h_all_colors_resize)
+		std::cout << v << " ";
+}
+void printColorPallete()
+{
+	size_t i = 0;
+	for (auto v : h_color_palette)
+	{
+		std::cout << i <<". " << (int)v.red << " " << (int)v.green << " " << (int)v.blue << "\n";
+		i++;
+	}
+}
+bool rfile(std::string file)
+{
+	filename = file;
+	return collectAllColors();
+}
+BMP(std::string file)
+{
 
-	
-	void writeHTML()
-	{
-		char h = '"';
-		std::ofstream to;
-		to.open("000.html", std::ios_base::out);
-		to << u8"<html><head><meta charset='utf-8'></head><body>";
-		int i = 0;
-		for (auto v : h_all_colors)
-		{
-			to << u8"<a style=" << h << "background-color:" << "rgb(" << (int)v.red << "," << (int)v.green << "," << (int)v.blue << ");" << h << ">" << "a" << u8"</a>";
-			i++;
-			if (i % image_info.biWidth == 0)
-				to << "<br>";
-		}
-		to<< u8"</body></html>";
-		to.close();
-	}
-	void printAllColors()
-	{
-		for (auto v : h_all_colors)
-			std::cout << (int)v.red << " " << (int)v.green << " " << (int)v.blue << "\n";
-	}
-	void printAllColorsResize()
-	{
-		for (auto v : h_all_colors_resize)
-			std::cout << v << " ";
-	}
-	void printColorPallete()
-	{
-		size_t i = 0;
-		for (auto v : h_color_palette)
-		{
-			std::cout << i <<". " << (int)v.red << " " << (int)v.green << " " << (int)v.blue << "\n";
-			i++;
-		}
-	}
-	bool rfile(std::string file)
-	{
-		filename = file;
-		return collectAllColors();
-	}
-	BMP(std::string file)
-	{
-
-		filename = file;
-	}
-	BMP()
-	{
-	}
-
+	filename = file;
+}
+BMP()
+{
+}
 };
 

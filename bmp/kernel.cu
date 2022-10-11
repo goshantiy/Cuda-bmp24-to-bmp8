@@ -8,7 +8,7 @@
 void printDeviceProp()
 {
 	cudaDeviceProp deviceProp;
-	cudaGetDeviceProperties(&deviceProp, 0);//определение	параметров GPU с номером 0
+	cudaGetDeviceProperties(&deviceProp, 0);
 	printf("Device name : %s\n", deviceProp.name);
 	printf("Total global memory : %d MB\n",
 		deviceProp.totalGlobalMem / 1024 / 1024);
@@ -64,8 +64,6 @@ __global__ void d_createColorPalette(int* d_all_colors, int* d_color_palette, si
 	int block = tid*num;
 	if (block < size)
 	{
-		/*for (int i = 0; i < num && block + i < 10000; i++)
-			temp_colors[block + i] = -1;*/
 		for (int i = 0; i < num && block + i < size; i++)
 		{
 			if (d_all_colors[block + i] != d_all_colors[block + i - 1])
@@ -95,15 +93,13 @@ __global__ void d_createColorPalette(int* d_all_colors, int* d_color_palette, si
 		}
 	}
 	__syncthreads();	
-	if (threadIdx.x == 0)
+	if (threadIdx.x == 0)//only one thread create resulting array to prevent data races
 	{
 		int color_palette[256];
 		UINT8 ix = 1;
 		color_palette[0] = temp_colors[0];
 		for (int i = 1; i < 10000; i++)
 		{
-			//if (temp_colors[i] != -1)
-			{
 				bool check = true;
 				for (int j = 0; (j < ix) && check; ++j)
 				{
@@ -115,12 +111,17 @@ __global__ void d_createColorPalette(int* d_all_colors, int* d_color_palette, si
 					color_palette[ix] = temp_colors[i];
 					ix++;
 				}
-			}
 		}
 		for (int i = 0; i < 256; i++)
 			d_color_palette[i] = color_palette[i];
 	}
 }
+
+/*
+INPUT: COLORS CONVERTED TO INT FROM GPU, COLOR PALETTE, RESULTING UINT8 ARRAY, SIZE OF COLORS ARRAY
+OUTPUT: UINT8 COLORS ARRAY
+EACH THREAD PROCESSES ONLY ONE COLOR:TRIES TO FIND COLOR IN COLOR PALETTE AND WRITES COLOR'S NUMBER TO RESULTING ARRAY
+*/
 __global__ void d_applyPalette(int* d_all_colors, int* d_color_palette, UINT8* d_result, size_t size)
 {
 	int ix = blockIdx.x * blockDim.x + threadIdx.x;
@@ -160,9 +161,12 @@ void printIntPaletteToRgb(std::vector<int>& colors)
 //CALL GPU KERNELS :
 //1. d_createColorPalette - Creating colors palette
 //2. d_applyPalette - Applyes palette to resize the BMP file from 24 bit to 8 bit
+//RUNS TEST TO VERIFY RESULT
 void gpuCall(BMP img)
 {
+	//-------------------------------------------------------------------------------------------------------
 	//GPU CREATE PALETTE
+	//-------------------------------------------------------------------------------------------------------
 	std::vector<int> all_colors_int(img.h_all_colors.size());
 	for (int i = 0; i < img.h_all_colors.size(); i++)
 		all_colors_int[i] = img.h_all_colors[i].convertRGBtoINT();
@@ -183,7 +187,7 @@ void gpuCall(BMP img)
 	dim3 dimGrid(1);
 	dim3 dimBlock;
 	int num;
-	if (all_colors_int.size() > 1024)
+	if (all_colors_int.size() > 256)
 	{
 		dimBlock.x = 256;
 		num = ceil(double(img.h_all_colors.size()) / 256.);
@@ -211,6 +215,7 @@ void gpuCall(BMP img)
 	cudaEventDestroy(stop);
 	//-------------------------------------------------------------------------------------------------------
 	// APPLY PALETTE
+	//-------------------------------------------------------------------------------------------------------
 	std::vector<UINT8> h_applyPalette_result(all_colors_int.size());
 	UINT8* d_applyPalette_result;
 	cudaEvent_t start1, stop1;
@@ -234,6 +239,8 @@ void gpuCall(BMP img)
 	cudaFree(d_color_palette);
 	cudaFree(d_applyPalette_result);
 
+
+	//TEST decode on CPU and verify with origin
 	BMP test;
 	test.h_color_palette.resize(256);
 	for (int i=0;i<h_palette_from_gpu.size(); i++)
@@ -258,7 +265,7 @@ void gpuCall(BMP img)
 	std::cout << "TEST. create and apply palette on GPU and decode on CPU: ";
 	if (check)
 		std::cout << "ok";
-	else std::cout << "ne ok";
+	else std::cout << "not ok";
 	std::cout << "\n";
 }
 
@@ -277,8 +284,6 @@ int main()
 
 	std::cout << "CPU PALETTE:\n";
     image.printColorPallete();
-   // image.printAllColorsResize();
-   // image.writeHTML();
 	gpuCall(image);
 	std::cout << "cpu milliseconds elapsed for creating palette: " << image.elapsed_palette.count() << "\n";
 	std::cout << "cpu milliseconds elapsed for applying palette: " << image.elapsed_applying.count() << "\n";
