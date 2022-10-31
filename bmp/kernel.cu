@@ -5,6 +5,7 @@
 #include <device_functions.h>
 #include <cuda_runtime_api.h>
 #include <stdio.h>
+#include <omp.h>
 void printDeviceProp()
 {
 	cudaDeviceProp deviceProp;
@@ -57,66 +58,35 @@ if value in hash table by index is busy, thread tries to find new index: index =
 if this hash table's value busy too, thread tries next indexes
 */
 
-__global__ void d_createColorPalette(int* d_all_colors, int* d_color_palette, size_t size,int num)
+__global__ void d_createColorPalette(int* d_all_colors, int* d_color_palette, size_t size,int* temp_colors)
 {
-	__shared__ int temp_colors[10000];
-	int tid = threadIdx.x;
-	int block = tid*num;
-	if (block < size)
+	int ix = blockIdx.x * blockDim.x + threadIdx.x;
+	if (ix < size)
 	{
-		for (int i = 0; i < num && block + i < size; i++)
-		{
-			if (d_all_colors[block + i] != d_all_colors[block + i - 1])
-			{
-				int index = (d_all_colors[block + i] * 0xDEADBEEF) >> 19;
-				if (temp_colors[index] == 0)
+		int index = (d_all_colors[ix] * 0xDEADBEEF) >> 19;
+				while (true)
 				{
-					temp_colors[index]= d_all_colors[block + i];
-				}
-				else
-				{
-					if (temp_colors[index] != d_all_colors[block + i])
+					int prev = atomicCAS(&temp_colors[index], 0, d_all_colors[ix]);
+					if (prev == 0 || prev == d_all_colors[ix])
 					{
-						index = (index + 1) & 4095;
-						while (temp_colors[index] != 0 && index < 10000)
-							index++;
-						if (index == 10000)
-						{
-							index = 0;
-							while (temp_colors[index] != 0 && index < 10000)
-								index++;
-						}
-						temp_colors[index] = d_all_colors[block + i];
+						temp_colors[index] = d_all_colors[ix];
+						break;
 					}
+					index = (index + 1) & 9999;
 				}
-			}
-		}
-	}
-	__syncthreads();	
-	if (threadIdx.x == 0)//only one thread create resulting array to prevent data races
-	{
-		int color_palette[256];
-		UINT8 ix = 1;
-		color_palette[0] = temp_colors[0];
-		for (int i = 1; i < 10000; i++)
-		{
-				bool check = true;
-				for (int j = 0; (j < ix) && check; ++j)
-				{
-					if (color_palette[j] == temp_colors[i])
-						check = false;
-				}
-				if (check)
-				{
-					color_palette[ix] = temp_colors[i];
-					ix++;
-				}
-		}
-		for (int i = 0; i < 256; i++)
-			d_color_palette[i] = color_palette[i];
 	}
 }
-
+__global__ void writePalette(int* d_color_palette, size_t size, int* temp_colors, int* num)
+{
+	int ix = blockIdx.x * blockDim.x + threadIdx.x;
+	if (ix < 10000)
+	{
+		if (temp_colors[ix] != 0)
+		{
+			d_color_palette[atomicAdd(num, 1)] = temp_colors[ix];
+		}
+	}
+}
 /*
 INPUT: COLORS CONVERTED TO INT FROM GPU, COLOR PALETTE, RESULTING UINT8 ARRAY, SIZE OF COLORS ARRAY
 OUTPUT: UINT8 COLORS ARRAY
@@ -177,37 +147,40 @@ void gpuCall(BMP img)
 	cudaEvent_t start, stop;
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
-
+	int* temp_colors;
+	int* num;
+	cudaMalloc(&temp_colors, 10000 * sizeof(int));
 	cudaMalloc(&d_all_colors, all_colors_int.size() * sizeof(int));
 	cudaMalloc(&d_color_palette, 256 * sizeof(int));
-	cudaMemcpyToSymbol(color_palette, img.h_color_palette.data(), 256);
+	cudaMalloc(&num, 1 * sizeof(int));
+	//cudaMemcpyToSymbol(color_palette, img.h_color_palette.data(), 256);
 	cudaEventRecord(start);
 	cudaMemcpy(d_all_colors, all_colors_int.data(), all_colors_int.size() * sizeof(int), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_color_palette, h_palette_from_gpu.data(), 256 * sizeof(int), cudaMemcpyHostToDevice);
-	dim3 dimGrid(1);
-	dim3 dimBlock;
-	int num;
-	if (all_colors_int.size() > 256)
-	{
-		dimBlock.x = 256;
-		num = ceil(double(img.h_all_colors.size()) / 256.);
-	}
-	else
-	{
-		dimBlock.x = all_colors_int.size();
-		num = 1;
-	}
-	d_createColorPalette<<<dimGrid, dimBlock>>> (d_all_colors, d_color_palette, all_colors_int.size(), num);
-	cudaDeviceSynchronize();
-	cudaMemcpy(h_palette_from_gpu.data(), d_color_palette, 256 * sizeof(int), cudaMemcpyDeviceToHost);
 
+
+
+	dim3 dimGrid(ceil(double(all_colors_int.size()) / 32.));
+	dim3 dimBlock(32);
+	d_createColorPalette<<<dimGrid, dimBlock>>> (d_all_colors, d_color_palette, all_colors_int.size(), temp_colors);
+	cudaDeviceSynchronize();
+	
+
+	dim3 gridWrite(ceil(10000. / 32.));
+	dim3 blockWrite(32);
+	writePalette <<< gridWrite, blockWrite >>> (d_color_palette, all_colors_int.size(), temp_colors, num);
+	cudaDeviceSynchronize();
+
+
+
+	cudaMemcpy(h_palette_from_gpu.data(), d_color_palette, 256 * sizeof(int), cudaMemcpyDeviceToHost);
 	cudaError_t err1 = cudaGetLastError();
 	if (err1 != cudaSuccess) printf("%s ",cudaGetErrorString(err1));
 	cudaEventRecord(stop);
 	cudaEventSynchronize(stop);
 	float milliseconds = 0;
 	cudaEventElapsedTime(&milliseconds, start, stop);
-	cleanPalette(h_palette_from_gpu);
+	//cleanPalette(h_palette_from_gpu);
 	std::cout << "GPU PALETTE:\n";
 	printIntPaletteToRgb(h_palette_from_gpu);
 	std::cout << "\ngpu milliseconds elapsed for creating palette: " << milliseconds << '\n';
@@ -245,7 +218,6 @@ void gpuCall(BMP img)
 	test.h_color_palette.resize(256);
 	for (int i=0;i<h_palette_from_gpu.size(); i++)
 	{
-
 		test.h_color_palette[i] = BMP::RGB::convertINTtoRGB(h_palette_from_gpu[i]);
 	}
 
@@ -275,15 +247,16 @@ int main()
 	//printDeviceProp();
 	//BMP image("testbmp.bmp");
 	//BMP image("testbmp3.bmp");
-	BMP image("parrots.bmp");
+	BMP image("parrotsscale.bmp");
+	//BMP image("parrots.bmp");
 	//BMP image("RAKETA.bmp");
+	//BMP image("1556708032_1.bmp");
 	image.collectAllColors();
 	image.h_createColorPallete();
 	image.h_applyPalette();
 
-
 	std::cout << "CPU PALETTE:\n";
-    image.printColorPallete();
+   image.printColorPallete();
 	gpuCall(image);
 	std::cout << "cpu milliseconds elapsed for creating palette: " << image.elapsed_palette.count() << "\n";
 	std::cout << "cpu milliseconds elapsed for applying palette: " << image.elapsed_applying.count() << "\n";
