@@ -153,7 +153,6 @@ void gpuCall(BMP img)
 	cudaMalloc(&d_all_colors, all_colors_int.size() * sizeof(int));
 	cudaMalloc(&d_color_palette, 256 * sizeof(int));
 	cudaMalloc(&num, 1 * sizeof(int));
-	//cudaMemcpyToSymbol(color_palette, img.h_color_palette.data(), 256);
 	cudaEventRecord(start);
 	cudaMemcpy(d_all_colors, all_colors_int.data(), all_colors_int.size() * sizeof(int), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_color_palette, h_palette_from_gpu.data(), 256 * sizeof(int), cudaMemcpyHostToDevice);
@@ -245,10 +244,9 @@ int main()
 {
     
 	//printDeviceProp();
-	//BMP image("testbmp.bmp");
 	//BMP image("testbmp3.bmp");
-	BMP image("parrotsscale.bmp");
-	//BMP image("parrots.bmp");
+	//BMP image("parrotsscale.bmp");
+	BMP image("parrots.bmp");
 	//BMP image("RAKETA.bmp");
 	//BMP image("1556708032_1.bmp");
 	image.collectAllColors();
@@ -257,7 +255,8 @@ int main()
 
 	std::cout << "CPU PALETTE:\n";
    image.printColorPallete();
-	gpuCall(image);
+	//gpuCall(image);
+	 image.WriteBMP8("8bit_image.bmp");
 	std::cout << "cpu milliseconds elapsed for creating palette: " << image.elapsed_palette.count() << "\n";
 	std::cout << "cpu milliseconds elapsed for applying palette: " << image.elapsed_applying.count() << "\n";
 }

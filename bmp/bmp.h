@@ -7,7 +7,6 @@
 #include <chrono>
 #include <fstream>
 #include <algorithm>
-
 class BMP
 {
 public:
@@ -17,6 +16,7 @@ public:
 		unsigned char red;
 		unsigned char green;
 		unsigned char blue;
+		unsigned char reserved = 0;
 		bool operator ==(const RGB r) const noexcept
 		{
 			return this->red == r.red && this->green == r.green && this->blue == r.blue;
@@ -81,7 +81,7 @@ bool collectAllColors()
 		fread(&image_info, sizeof(image_info), 1, bmpFile);
 
 		h_all_colors.resize(image_info.biHeight * image_info.biWidth);
-		const int padding = ((4 - (image_info.biWidth * 3) % 4) % 4);//calculate padding for align to 4 bytes
+		const int padding = (4 - (image_info.biWidth * 3) % 4) % 4;//calculate padding for align to 4 bytes
 		for (int i = 0; i < image_info.biHeight; ++i)//read colors 
 		{
 			for (int j = 0; j < image_info.biWidth; ++j)
@@ -96,6 +96,38 @@ bool collectAllColors()
 		return true;
 	}
 	return false;
+}
+void WriteBMP8(std::string name)
+{
+	std::ofstream file(name,std::ofstream::binary);
+	
+	image_info.biClrUsed = h_color_palette.size();
+	image_info.biBitCount = 8;
+	image_info.biSizeImage = h_all_colors_resize.size()*sizeof(UINT8);
+	image_file.bfSize = sizeof(BITMAPFILEHEADER) + image_info.biSize + h_color_palette.size()*sizeof(RGBQUAD)+ image_info.biSizeImage;
+	image_file.bfOffBits =  sizeof(BITMAPFILEHEADER) +	image_info.biSize + image_info.biClrUsed * sizeof(RGBQUAD);
+	unsigned char reserved = 0;
+	const int padding = (4 - ((4 - (image_info.biWidth * 3) % 4) % 4))&3;
+		file.write(reinterpret_cast<char*>(&image_file), sizeof(image_file));
+		file.write(reinterpret_cast<char*>(&image_info), sizeof(image_info));
+		for (auto& v : h_color_palette)
+		{
+			file.write(reinterpret_cast<char*>(&v.blue), sizeof(UINT8));
+			file.write(reinterpret_cast<char*>(&v.green), sizeof(UINT8));
+			file.write(reinterpret_cast<char*>(&v.red), sizeof(UINT8));
+			file.write(reinterpret_cast<char*>(&v.reserved), sizeof(UINT8));
+		}
+		for (int i = 0; i < image_info.biHeight; i++)
+		{
+			for (int j = 0; j < image_info.biWidth; j++)
+			{
+				file.write(reinterpret_cast<char*>(&h_all_colors_resize[i * image_info.biWidth + j]), sizeof(UINT8));
+			}
+			for(int k=0;k<padding;k++)
+			file.write(reinterpret_cast<char*>(&reserved), sizeof(UINT8));
+		}
+		
+	file.close();
 }
 void returnColors(std::vector<RGB> &result)
 {
@@ -128,16 +160,16 @@ int findColor(RGB color)
 	int i = 0;
 	for (auto v : h_color_palette)
 	{
-		i++;
 		if (v == color)
 			return i;
+		i++;
 	}
 	return i;
 }
 void h_applyPalette()
 {
 	h_all_colors_resize.resize(h_all_colors.size());
-	UINT8 i = 0;
+	int i = 0;
 	auto begin = std::chrono::steady_clock::now();
 	for (auto v : h_all_colors)
 	{
